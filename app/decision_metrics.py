@@ -176,21 +176,43 @@ def _next_validation_checklist(ctx: Any) -> list[str]:
     return out
 
 
-def compute_metrics(ctx: Any) -> dict[str, Any]:
+_CALM_WEIGHT = 0.15
+
+
+def compute_metrics(ctx: Any, calm_data: dict[str, Any] | None = None) -> dict[str, Any]:
     """
     计算决策指数并写入 ctx.extra["decision_metrics"]。
-    返回该 dict，便于 UI 直接使用。
+
+    Parameters
+    ----------
+    ctx : DecisionContext
+    calm_data : dict, optional
+        evaluate_calm() 的返回值。提供时会混合 calm_score 到最终指数，
+        并根据 calm_level 修正 action_mode。
     """
+    from agents.calm_evaluator import apply_calm_to_recommendation
+
     f_score, f_issues = _feasibility_score(ctx)
     m_score, m_issues = _market_score(ctx)
     r_score, r_issues = _risk_score(ctx)
     res_score, res_issues = _resource_score(ctx)
 
-    decision_score = f_score + m_score + r_score + res_score
+    base_score = f_score + m_score + r_score + res_score
+    base_score = min(100, max(0, base_score))
+
+    calm = calm_data or {}
+    calm_score = calm.get("calm_score", 100)
+    calm_level = calm.get("calm_level", "high")
+
+    decision_score = round(base_score * (1 - _CALM_WEIGHT) + calm_score * _CALM_WEIGHT)
     decision_score = min(100, max(0, decision_score))
+
+    raw_rec = _recommendation(ctx)
+    action_mode = apply_calm_to_recommendation(raw_rec, calm_level)
 
     metrics = {
         "decision_score": decision_score,
+        "base_score": base_score,
         "scores": {
             "feasibility": f_score,
             "market": m_score,
@@ -198,11 +220,15 @@ def compute_metrics(ctx: Any) -> dict[str, Any]:
             "resource": res_score,
         },
         "grade": _grade(decision_score),
-        "recommendation": _recommendation(ctx),
+        "recommendation": action_mode,
         "risk_display": _risk_display(ctx),
         "key_uncertainties": _key_uncertainties(ctx),
         "next_validation_checklist": _next_validation_checklist(ctx),
         "missing_or_fallback": f_issues + m_issues + r_issues + res_issues,
+        "calm_score": calm_score,
+        "calm_level": calm_level,
+        "cooldown_tip": calm.get("cooldown_tip", ""),
+        "action_mode": action_mode,
     }
     extra = getattr(ctx, "extra", None)
     if extra is not None:

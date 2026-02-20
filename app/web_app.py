@@ -331,6 +331,28 @@ def generate_markdown_report(ctx: DecisionContext) -> str:
             "",
         ])
 
+    _calm_md = ctx.extra.get("calm", {})
+    _calm_rx_md = _build_calm_prescriptions(_calm_md)
+    if _calm_rx_md:
+        _raw_md = _calm_md.get("_raw", {})
+        _level_md = {"high": "高", "medium": "中等", "low": "偏低"}.get(
+            _calm_md.get("calm_level", ""), "-")
+        lines.extend([
+            "## 冷静度校准（风险防护）",
+            "",
+            f"- **冷静指数：** {_calm_md.get('calm_score', '-')} / 100（{_level_md}）",
+            f"- 方向摇摆：{_raw_md.get('direction_change', '-')}　|　"
+            f"冲动风险：{_raw_md.get('impulse', '-')}　|　"
+            f"信息过载：{_raw_md.get('consume_vs_act', '-')}　|　"
+            f"止损线：{_raw_md.get('stop_loss', '-')}",
+            "",
+            "**防冲动处方：**",
+            "",
+        ])
+        for _j, _rx_md in enumerate(_calm_rx_md, 1):
+            lines.append(f"{_j}. {_rx_md}")
+        lines.append("")
+
     return "\n".join(lines)
 
 
@@ -386,6 +408,44 @@ def _split_strategy(stage: dict | None) -> tuple[dict, dict]:
     return risk_view, strategy_view
 
 
+def _build_calm_prescriptions(calm: dict) -> list[str]:
+    """根据冷静度各因子生成可执行处方（至少 2 条）。"""
+    prescriptions: list[str] = []
+    level = calm.get("calm_level", "high")
+    if level == "high":
+        return []
+
+    raw = calm.get("_raw", {})
+    direction = raw.get("direction_change", "从不")
+    impulse = raw.get("impulse", "没有")
+    consume = raw.get("consume_vs_act", "很少")
+    stop_loss = raw.get("stop_loss", "有")
+
+    if direction in ("偶尔", "经常"):
+        prescriptions.append(
+            "方向锁定规则：写下当前唯一方向并贴在工位，未来 14 天内不讨论、不搜索其他方向；"
+            "如果仍想换，先写满 500 字理由再决定")
+    if impulse in ("偶尔", "经常"):
+        prescriptions.append(
+            "48 小时冷静期：任何超过月收入 20% 的投入决策，必须间隔 48 小时再执行；"
+            "期间找 1 位局外人复述你的逻辑")
+    if consume in ("有时", "经常"):
+        prescriptions.append(
+            "行动/信息比 ≥ 1:1：每消费 30 分钟内容，必须产出一条可验证的行动（如发一条帖子、打一通电话）")
+    if stop_loss in ("模糊", "没有"):
+        prescriptions.append(
+            "止损线量化：今天写下「当 _____ 发生时我停止」，包含金额上限、时间上限和情绪触发条件各一条")
+
+    if level == "low" and len(prescriptions) < 3:
+        prescriptions.append(
+            "7 天冷静窗口：本周只做信息收集和小规模验证，不做任何不可逆承诺（辞职/签约/大额付款）")
+
+    if len(prescriptions) < 2:
+        prescriptions.append("每晚用 3 分钟写下今天做的 1 个决策和背后的理由，持续 7 天后再做大决策")
+
+    return prescriptions
+
+
 def render_core_judgment(ctx: DecisionContext):
     """核心判断：一句话结论 + 关键原因 + 下一步建议。"""
     strategy = ctx.get_stage("strategy_advice") or {}
@@ -425,6 +485,16 @@ def render_core_judgment(ctx: DecisionContext):
                 st.markdown(f"{i}. {a}")
         else:
             st.caption("暂无")
+
+    calm = ctx.extra.get("calm", {})
+    prescriptions = _build_calm_prescriptions(calm)
+    if prescriptions:
+        level_label = {"medium": "中等", "low": "偏低"}.get(
+            calm.get("calm_level", ""), "")
+        st.markdown(f"#### 冷静度校准　（当前冷静度：**{level_label}**）")
+        for i, p in enumerate(prescriptions, 1):
+            st.markdown(f"{i}. {p}")
+        st.caption("以上处方基于你的冷静度体检结果自动生成，目标是降低冲动决策风险。")
 
 
 def render_ctx_display(ctx: DecisionContext):
@@ -499,6 +569,22 @@ def render_ctx_display(ctx: DecisionContext):
             st.markdown(f"**总结：** {ctx.reflection.get('summary', '-')}")
             for a in ctx.reflection.get("suggested_actions") or []:
                 st.markdown(f"- {a}")
+
+        _calm_proc = ctx.extra.get("calm", {})
+        _calm_rx = _build_calm_prescriptions(_calm_proc)
+        if _calm_rx:
+            st.markdown("---")
+            st.markdown("#### 冷静度校准（风险防护）")
+            _raw = _calm_proc.get("_raw", {})
+            st.markdown(
+                f"方向摇摆：**{_raw.get('direction_change', '-')}**　|　"
+                f"冲动风险：**{_raw.get('impulse', '-')}**　|　"
+                f"信息过载：**{_raw.get('consume_vs_act', '-')}**　|　"
+                f"止损线：**{_raw.get('stop_loss', '-')}**"
+            )
+            st.markdown(f"冷静指数：**{_calm_proc.get('calm_score', '-')}** / 100")
+            for _i, _rx in enumerate(_calm_rx, 1):
+                st.markdown(f"{_i}. {_rx}")
 
     # ── Agent Outputs（标签页，JSON 隐藏在"技术详情"内） ──
     st.subheader("Agent Outputs")
@@ -1024,29 +1110,17 @@ def main() -> None:
     
     st.divider()
 
-    st.markdown("**请选择决策子模块**")
-    scene = st.radio(
-        "选择场景",
-        ["创业 / 副业决策", "交通工程低碳决策"],
-        horizontal=True,
-        label_visibility="collapsed",
-    )
+    # ================================================================
+    # 区块 1 ─ 当前创业状态
+    # ================================================================
+    st.subheader("创业成长诊断")
+    st.caption("数据不保存，如需留档请使用底部导出功能。")
 
-    if scene == "交通工程低碳决策":
-        render_lowcarbon_scene()
-        return
-
-    # ── 创业决策：模块化输入 ──
-    st.subheader("创业 / 副业决策建模")
-    st.info("本系统默认不保存个人决策数据。如需保存，请使用下方「导出决策档案」功能。")
-
-    # A. 核心问题
     question = st.text_input(
         "你想决策的问题（一句话）",
         placeholder="例如：我该不该辞职做 AI 自媒体？",
     )
 
-    # B. 现状 / 资源 / 约束
     col_b1, col_b2, col_b3 = st.columns(3)
     with col_b1:
         inp_status = st.text_area(
@@ -1067,41 +1141,71 @@ def main() -> None:
             height=100,
         )
 
-    # C. 最在意什么
-    concern_options = ["亏钱", "浪费时间", "方向选错", "社交压力", "不够 AI / 技术壁垒不足"]
-    concerns = st.multiselect(
-        "你最在意什么？（可多选）",
-        options=concern_options,
-        default=[],
-        placeholder="选择你最担心的风险…",
-    )
-
-    # D. 期限
-    col_d, col_e = st.columns(2)
-    with col_d:
-        deadline = st.selectbox(
-            "期望验证周期",
-            options=["1 个月", "3 个月", "6 个月", "1 年"],
-            index=1,
-        )
-    # E. 成功标准
-    with col_e:
-        success_criteria = st.text_input(
-            "成功标准",
-            placeholder="例如：3 个月内月收入 5k / 验证 PMF",
+    with st.expander("高级选项（可选）"):
+        concern_options = ["亏钱", "浪费时间", "方向选错", "社交压力", "不够 AI / 技术壁垒不足"]
+        concerns = st.multiselect(
+            "你最在意什么？（可多选）",
+            options=concern_options,
+            default=[],
+            placeholder="选择你最担心的风险…",
         )
 
-    # F. 补充说明
-    extra_note = st.text_area(
-        "补充说明（可选）",
-        placeholder="任何你觉得对决策有帮助的信息…",
-        height=80,
-    )
+        col_d, col_e = st.columns(2)
+        with col_d:
+            deadline = st.selectbox(
+                "期望验证周期",
+                options=["1 个月", "3 个月", "6 个月", "1 年"],
+                index=1,
+            )
+        with col_e:
+            success_criteria = st.text_input(
+                "成功标准",
+                placeholder="例如：3 个月内月收入 5k / 验证 PMF",
+            )
 
-    # G. 扩展决策空间
-    expand_mode = st.checkbox("扩展决策空间（自动生成 保守 / 当前 / 激进 对比）", value=False)
+        extra_note = st.text_area(
+            "补充说明",
+            placeholder="任何你觉得对决策有帮助的信息…",
+            height=80,
+        )
 
-    # 拼接 background —— 保持后端接口不变
+        expand_mode = st.checkbox(
+            "扩展决策空间（自动生成 保守 / 当前 / 激进 对比）", value=False)
+
+    # ================================================================
+    # 区块 2 ─ 决策冷静度体检（4 问，规则评分）
+    # ================================================================
+    st.subheader("决策冷静度体检")
+
+    with st.expander("决策冷静度（可选，全部有默认值）"):
+        cm1, cm2 = st.columns(2)
+        with cm1:
+            calm_q1 = st.selectbox(
+                "近 1 个月是否频繁想换方向",
+                ["从不", "偶尔", "经常"], index=0, key="calm_q1")
+            calm_q2 = st.selectbox(
+                "是否有冲动投入 / 冲动辞职念头",
+                ["没有", "偶尔", "经常"], index=0, key="calm_q2")
+        with cm2:
+            calm_q3 = st.selectbox(
+                "是否刷内容多、行动少",
+                ["很少", "有时", "经常"], index=0, key="calm_q3")
+            calm_q4 = st.selectbox(
+                "是否有明确止损线",
+                ["有", "模糊", "没有"], index=0, key="calm_q4")
+
+    calm_input: dict[str, str] = {
+        "direction_change": calm_q1,
+        "impulse": calm_q2,
+        "consume_vs_act": calm_q3,
+        "stop_loss": calm_q4,
+    }
+
+    # ================================================================
+    # 区块 3 ─ 生成成长路径
+    # ================================================================
+    st.subheader("生成成长路径")
+
     def _assemble_background() -> str:
         parts: list[str] = []
         if inp_status.strip():
@@ -1121,7 +1225,7 @@ def main() -> None:
         return "\n".join(parts)
 
     just_ran = False
-    if st.button("运行决策引擎"):
+    if st.button("开始成长诊断", type="primary"):
         if not question.strip():
             st.warning("请填写问题")
             return
@@ -1143,6 +1247,7 @@ def main() -> None:
                     question=question.strip(),
                     background=background,
                     context_dict=context_dict,
+                    calm_input=calm_input,
                 )
             total_usage: dict = {"llm_calls": 0, "token_est": 0}
             for _k in ("baseline", "current", "aggressive"):
@@ -1154,10 +1259,11 @@ def main() -> None:
             st.session_state.run_time = triple["elapsed_time"]
             st.session_state.usage = total_usage
         else:
-            with st.spinner("执行中…"):
+            with st.spinner("诊断中…"):
                 report = run_decision(
                     question=question.strip(),
                     background=background,
+                    calm_input=calm_input,
                 )
             st.session_state.current_ctx = report.ctx
             st.session_state.triple_result = None
@@ -1167,6 +1273,8 @@ def main() -> None:
         just_ran = True
 
     # ── 展示结果 ──
+    has_result = st.session_state.triple_result or st.session_state.current_ctx
+
     if st.session_state.triple_result:
         render_triple_result(st.session_state.triple_result, just_ran)
 
@@ -1179,6 +1287,28 @@ def main() -> None:
 
         st.subheader("决策指数")
         render_kpi(show_metrics)
+
+        calm_data = show_ctx.extra.get("calm", {})
+        if calm_data:
+            cs = calm_data.get("calm_score", "-")
+            cl = calm_data.get("calm_level", "-")
+            tip = calm_data.get("cooldown_tip", "")
+            am = show_metrics.get("action_mode", show_metrics.get("recommendation", "-"))
+            ck1, ck2, ck3 = st.columns(3)
+            with ck1:
+                st.metric("冷静指数", f"{cs}")
+            with ck2:
+                st.metric("行动模式", am)
+            with ck3:
+                level_map = {"high": "🟢 高", "medium": "🟡 中", "low": "🔴 低"}
+                st.metric("冷静度", level_map.get(cl, cl))
+            if tip:
+                if cl == "high":
+                    st.success(tip)
+                elif cl == "medium":
+                    st.warning(tip)
+                else:
+                    st.error(tip)
 
         render_ctx_display(show_ctx)
 
@@ -1201,6 +1331,69 @@ def main() -> None:
                 file_name=f"decision_report_{ts}.md",
                 mime="text/markdown",
                 key=f"dl_md_result_{show_ctx.id[:8]}",
+            )
+
+    # ── 诊断完成后才显示 7 天计划 ──
+    if has_result:
+        st.divider()
+        if st.button("生成 7 天理性成长计划", key="btn_7day"):
+            _q = question.strip() or "我的创业方向"
+
+            _ctx_for_plan = st.session_state.current_ctx
+            _plan_calm = (_ctx_for_plan.extra.get("calm", {}) if _ctx_for_plan else {})
+            _plan_level = _plan_calm.get("calm_level", "high")
+            _plan_rx = _build_calm_prescriptions(_plan_calm)
+
+            _day1_actions = ["用一句话写下你要验证的假设", "列出 3 个你最不确定的点", "找一个同行聊 15 分钟"]
+            if _plan_level != "high" and _plan_rx:
+                _day1_actions.insert(0, f"冷静度处方：{_plan_rx[0]}")
+
+            _day6_actions = ["列出当前最大的 3 个风险", "盘点手头可复用的资源", "评估 3 个月内的资金跑道"]
+            if _plan_level != "high":
+                _day6_actions.append("回顾本周是否触发了止损线，如果没有明确止损线则今天写一条")
+
+            _DAYS = [
+                ("明确核心问题", _day1_actions, "今天做的事和我真正想验证的问题一致吗？"),
+                ("信息收集", ["搜索 3 篇相关行业报告或文章", "记录 5 个潜在竞品并写出差异", "整理目标用户画像"], "我收集的信息有没有改变我的初始假设？"),
+                ("最小验证设计", ["设计一个 48 小时可完成的最小实验", "确定核心指标（如转化率/意向数）", "准备实验所需素材"], "这个实验能否真正验证我的核心假设？"),
+                ("执行验证", ["上线最小实验", "主动触达 10 个目标用户", "记录所有反馈（原文）"], "用户反馈中最让我意外的是什么？"),
+                ("数据复盘", ["汇总实验数据并对比预期", "归纳 3 条已验证的结论", "列出仍然未知的 2 个问题"], "如果只保留一个结论，我最有信心的是哪个？"),
+                ("风险与资源盘点", _day6_actions, "最大的风险是否在我可控范围内？"),
+                ("决策与下一步", ["用 1 句话写出你的决定", "制定未来 30 天行动计划", "设定第一个里程碑和截止日期"], "一周前的我和今天的我，判断力发生了什么变化？"),
+            ]
+            md_lines = [f"# 7 天理性成长计划\n", f"决策主题：{_q}\n"]
+            for i, (goal, actions, review) in enumerate(_DAYS, 1):
+                md_lines.append(f"## Day {i}：{goal}\n")
+                md_lines.append("**今日目标**")
+                md_lines.append(f"- {goal}\n")
+                md_lines.append("**行动清单**")
+                for a in actions:
+                    md_lines.append(f"- [ ] {a}")
+                md_lines.append(f"\n**复盘问题**")
+                md_lines.append(f"> {review}\n")
+
+            _plan_score = _plan_calm.get("calm_score", "-")
+            if _plan_level != "high" and _plan_rx:
+                md_lines.append("## 冷静度校准（附录）\n")
+                md_lines.append(f"冷静指数：{_plan_score} / 100\n")
+                md_lines.append("**防冲动处方：**\n")
+                for _j, _rx in enumerate(_plan_rx, 1):
+                    md_lines.append(f"{_j}. {_rx}")
+                md_lines.append("")
+
+            md_lines.append("---")
+            md_lines.append(f"*决策稳定度：{_plan_score}　|　由 AI Decision OS 生成*\n")
+            st.session_state["plan_7day"] = "\n".join(md_lines)
+
+        if st.session_state.get("plan_7day"):
+            with st.expander("查看 7 天理性成长计划", expanded=True):
+                st.markdown(st.session_state["plan_7day"])
+            st.download_button(
+                label="下载 7 天计划（Markdown）",
+                data=st.session_state["plan_7day"],
+                file_name="7day_growth_plan.md",
+                mime="text/markdown",
+                key="dl_7day_md",
             )
 
 
