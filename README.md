@@ -1,102 +1,101 @@
-# Decision Engine Core v0.3
+# AI Decision OS
 
-多智能体决策引擎原型：4 Agent 闭环（创意验证 → 市场分析 → 策略建议 → 反思）。支持 **Mock**（默认）与 **通义千问（Qwen）**，Qwen 失败自动回退 Mock；每次运行结果会保存到 `data/sessions/`。v0.3 新增 **决策指数（Decision Metrics）**：综合分 0–100、等级 A/B/C/D、建议与风险 KPI，以及 Markdown 报告中的指数章节。
+> 给创业者的理性决策操作系统。多 Agent 协作 × 冷静度校准 × 可解释建议。
 
-## 运行
+---
 
-### 1. 虚拟环境与依赖
+## 一句话定位
+
+输入一个创业想法，获得结构化诊断、风险评估、行动计划——以及一面防止冲动决策的镜子。
+
+## 核心功能
+
+| 功能 | 说明 |
+|------|------|
+| **创业成长诊断** | 4 Agent 闭环（创意验证 → 市场分析 → 策略建议 → 反思）自动生成决策报告 |
+| **决策指数** | 综合分 0–100 + 可行性 / 市场 / 风险 / 资源四维评分，规则驱动、可解释 |
+| **冷静度校准** | 4 道行为问题量化决策状态，低冷静度自动降级行动建议 + 输出防冲动处方 |
+| **扩展决策空间** | 一键生成保守 / 当前 / 激进三方案对比，含推荐方案与置信度 |
+| **7 天理性成长计划** | 诊断后一键生成 Day 1–7 行动清单，冷静度处方自动注入 |
+| **多格式导出** | JSON 决策档案 + Markdown 报告，数据不落盘、不保存 |
+
+## 目标人群
+
+- 正在纠结要不要辞职创业的打工人
+- 已启动副业、需要理性复盘和下一步规划的创业者
+- 团队内部做方向决策时需要一份结构化参考
+
+## 快速运行
 
 ```bash
+# 1. 安装依赖
 cd decision_os
 python -m venv .venv
-# Windows:
-.venv\Scripts\activate
-# Linux/macOS:
-# source .venv/bin/activate
+.venv\Scripts\activate          # Windows
+# source .venv/bin/activate     # macOS / Linux
 pip install -r requirements.txt
-```
 
-### 2. 环境变量（可选）
+# 2. 配置（可选，不配也能跑）
+cp .env.example .env
+# 默认 Mock 模式，填入 DASHSCOPE_API_KEY 后切换为通义千问
 
-- 复制示例并按需填写：
-  ```bash
-  cp .env.example .env
-  ```
-- 使用 **Mock**（默认）：无需配置，不填 `DASHSCOPE_API_KEY` 即可运行。
-- 使用 **通义千问**：在 `.env` 中设置：
-  - `LLM_PROVIDER=qwen`
-  - `DASHSCOPE_API_KEY=你的 API Key`（在 [DashScope 控制台](https://dashscope.console.aliyun.com/) 创建）
-  - 可选：`QWEN_MODEL=qwen-plus`（默认即为 qwen-plus）
-
-### 3. 启动应用
-
-```bash
+# 3. 启动
 streamlit run app/web_app.py
 ```
 
-浏览器打开提示的 URL，输入问题后点击「运行决策引擎」即可看到 3 个 stage 输出与 Reflection；界面会提示会话已保存，并可使用「下载本次会话 JSON」下载当前运行的完整 ctx。
+打开浏览器 → 输入创业问题 → 点击「开始成长诊断」→ 查看报告。
 
-## v0.2 新功能
+## 技术架构
 
-### 顶部运行状态栏
+```
+decision_os/
+├── core/               # 内核层（不依赖 UI）
+│   ├── context.py      # DecisionContext 统一数据容器
+│   ├── engine.py       # 串行调度 + Reflection 回路
+│   ├── orchestrator.py # 统一入口 run_decision / run_decision_space_expand
+│   ├── schemas.py      # Agent 输出 JSON Schema
+│   ├── base_agent.py   # BaseAgent + Mock / Qwen LLM 切换
+│   └── variants.py     # 保守 / 激进方案规则生成
+│
+├── agents/             # 4 Agent + 冷静度评估
+│   ├── idea_validator  # 创意验证
+│   ├── market_analyzer # 市场分析
+│   ├── strategy_advisor# 策略建议（含风险 + 资源）
+│   ├── reflector       # 反思一致性校验
+│   └── calm_evaluator  # 冷静度规则引擎（不调 LLM）
+│
+├── app/                # Streamlit UI 层
+│   ├── web_app.py      # 主页面
+│   ├── decision_metrics.py  # 决策指数 + 可视化
+│   └── usage.py        # Token 用量估算
+│
+└── .env.example        # 环境变量模板
+```
 
-页面顶部显示：
-- **Provider**：当前使用的 LLM 提供商（mock / qwen）
-- **Qwen 模型**：若使用 Qwen，显示模型名称
-- **调用次数**：当前运行调用次数（占位显示）
-- **Token 消耗**：Token 使用量（占位显示：估算中）
-- **运行耗时**：本次运行耗时（秒）
+**关键设计**
 
-### 历史会话管理
+- LLM 可插拔：默认 Mock 零成本运行，配置 Key 后无缝切换通义千问，失败自动回退
+- 评分可解释：决策指数 = 四维规则映射 × 0.85 + 冷静度 × 0.15，不依赖黑盒模型
+- 冷静度独立于 LLM：纯规则引擎，4 题 → 分数 → 降级 / 处方，延迟 ≈ 0
 
-- 左侧边栏提供「历史会话」功能
-- 自动读取 `data/sessions/` 下的 JSON 文件
-- 按时间倒序显示最近 20 条会话
-- 选择会话后点击「加载会话」即可查看历史结果
-- 加载的会话会直接展示，无需重新运行引擎
+## 演示流程（3 分钟）
 
-**使用方式**：
-1. 在左侧边栏选择历史会话（显示格式：`2026-02-16 15:30:10 (xxx)`）
-2. 点击「加载会话」按钮
-3. 页面会展示该会话的完整内容
+1. 打开页面，输入「我该不该辞职做 AI 自媒体？」
+2. 填写现状 / 资源 / 约束（有 placeholder 引导）
+3. 展开冷静度体检，调到「经常想换方向 + 没有止损线」
+4. 点击「开始成长诊断」
+5. 看到：决策指数 → 冷静度校准处方 → 核心判断 → 决策过程
+6. 勾选「扩展决策空间」→ 再次诊断 → 三方案雷达图对比
+7. 点击「生成 7 天理性成长计划」→ 下载 Markdown
 
-### Markdown 报告导出
+## 未来规划
 
-每次运行后，除了 JSON 下载，还提供「下载 Markdown 报告」功能：
+- [ ] 接入更多 LLM（GPT-4o / Claude / 本地模型）
+- [ ] 多轮决策追踪：同一方向的第 2 次、第 3 次诊断自动对比
+- [ ] 团队协作模式：多人投票 + 分歧可视化
+- [ ] 行业知识库：注入垂直领域数据（餐饮 / SaaS / 内容电商）
+- [ ] 移动端适配
 
-- 报告包含：
-  - 用户输入（问题、背景）
-  - 决策阶段（问题解析、市场分析、策略建议）
-  - 反思总结
-- 格式清晰，使用标准 Markdown 标题
-- 文件名包含时间戳：`decision_report_2026-02-16T15-30-10.md`
+---
 
-**使用方式**：
-1. 运行决策引擎后，在结果区域找到「下载 Markdown 报告」按钮
-2. 点击下载即可获得格式化的决策报告
-
-## v0.3 决策指数（Decision Metrics）
-
-- **综合分**：0–100，由可行性、市场、风险、资源四项各 0–25 规则汇总，可解释、可复现（不依赖 LLM）。
-- **等级**：A（≥80）、B（60–79）、C（40–59）、D（<40）。
-- **建议**：做 / 谨慎 / 暂缓 / 不建议（来自策略阶段 verdict）。
-- **风险**：低 / 中 / 高（来自策略阶段 overall_risk_level）。
-- 结果写入 `ctx.extra["decision_metrics"]`；UI 顶部在状态栏下方展示 KPI。
-- Markdown 报告新增「决策指数（v0.3）」章节：综合分、分项分、关键不确定性、下一步验证清单。
-- 缺字段时优雅降级（默认中等分并说明缺失），不报错。
-
-## 会话持久化
-
-- 每次点击运行并得到结果后，会自动创建目录 `data/sessions`（若不存在），并将本次完整 ctx（含 stages 与 reflection）保存为 JSON。
-- 文件名格式：`2026-02-16T15-30-10_<短id>.json`（Windows 兼容，无冒号）。
-- 无论使用 Mock 还是 Qwen，都会保存；保存成功后页面会显示路径并提供下载按钮。
-
-**示例路径**：`data/sessions/2026-02-16T15-30-10_a1b2c3d4.json`
-
-## 结构
-
-- `core/`: 内核（DecisionContext、BaseAgent、Engine、schemas）；BaseAgent 支持 Mock / Qwen，失败回退 Mock。
-- `agents/`: idea_validator、market_analyzer、strategy_advisor、reflector。
-- `app/web_app.py`: Streamlit 演示与 session 保存、下载、KPI 展示。
-- `app/session_store.py`: 历史会话管理（v0.2）。
-- `app/decision_metrics.py`: 决策指数计算（v0.3）。
+MIT License · Built with Streamlit + DashScope
