@@ -254,9 +254,25 @@ try:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    import matplotlib.font_manager as _fm
     import numpy as np
-    plt.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "Arial Unicode MS", "DejaVu Sans"]
-    plt.rcParams["axes.unicode_minus"] = False
+
+    def _setup_cjk_font() -> None:
+        """注册项目内置 NotoSansSC 字体，确保部署环境下中文正常渲染。"""
+        import pathlib
+        font_path = pathlib.Path(__file__).resolve().parent.parent / "assets" / "fonts" / "NotoSansSC-Regular.otf"
+        if font_path.exists():
+            _fm.fontManager.addfont(str(font_path))
+            prop = _fm.FontProperties(fname=str(font_path))
+            family = prop.get_name()
+            plt.rcParams["font.sans-serif"] = [family] + plt.rcParams.get("font.sans-serif", [])
+        else:
+            plt.rcParams["font.sans-serif"] = [
+                "SimHei", "Microsoft YaHei", "Arial Unicode MS", "DejaVu Sans",
+            ]
+        plt.rcParams["axes.unicode_minus"] = False
+
+    _setup_cjk_font()
     _MPL_AVAILABLE = True
 except Exception:
     plt = None  # type: ignore[assignment]
